@@ -91,6 +91,7 @@ int             killed(struct proc*);
 void            setkilled(struct proc*);
 int             ksuspend(int);
 int             kresume(int);
+int             kpstate(int);
 void            suspend_check(void);
 struct cpu*     mycpu(void);
 struct proc*    myproc();

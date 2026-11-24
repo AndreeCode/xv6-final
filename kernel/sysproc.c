@@ -128,3 +128,12 @@ sys_resume(void)
   argint(0, &pid);
   return kresume(pid);
 }
+
+uint64
+sys_pstate(void)
+{
+  int pid;
+
+  argint(0, &pid);
+  return kpstate(pid);
+}

@@ -27,6 +27,7 @@ int uptime(void);
 int sync(void);
 int suspend(int pid);
 int resume(int pid);
+int pstate(int pid);
 
 // ulib.c
 int stat(const char *, struct stat *);

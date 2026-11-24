@@ -806,6 +806,21 @@ kresume(int pid)
   return r;
 }
 
+// Returns the state (enum procstate) of the process with the given
+// pid, or SUSP_ENOPROC if it does not exist.
+int
+kpstate(int pid)
+{
+  struct proc *p;
+  int st;
+
+  if ((p = findproc(pid)) == 0)
+    return SUSP_ENOPROC;
+  st = p->state;
+  release(&p->lock);
+  return st;
+}
+
 // Called by the current process at a safe point (just before
 // returning to user space). If a suspension was requested, the
 // process enters SUSPENDED and gives up the CPU until kresume()

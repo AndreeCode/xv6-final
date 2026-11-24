@@ -153,6 +153,8 @@ UPROGS=\
 	$U/_sync\
 	$U/_suspend\
 	$U/_resume\
+	$U/_pstate\
+	$U/_suspendtest\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

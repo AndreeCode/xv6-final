@@ -23,3 +23,4 @@
 #define SYS_sync   22
 #define SYS_suspend 23
 #define SYS_resume  24
+#define SYS_pstate  25

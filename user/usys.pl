@@ -45,3 +45,4 @@ entry("uptime");
 entry("sync");
 entry("suspend");
 entry("resume");
+entry("pstate");

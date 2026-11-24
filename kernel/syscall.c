@@ -105,6 +105,7 @@ extern uint64 sys_close(void);
 extern uint64 sys_sync(void);
 extern uint64 sys_suspend(void);
 extern uint64 sys_resume(void);
+extern uint64 sys_pstate(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -134,6 +135,7 @@ static uint64 (*syscalls[])(void) = {
   [SYS_sync]    = sys_sync,
   [SYS_suspend] = sys_suspend,
   [SYS_resume]  = sys_resume,
+  [SYS_pstate]  = sys_pstate,
   // clang-format on
 };
 
