@@ -446,6 +446,9 @@ scheduler(void)
     int found = 0;
     for (p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+      // Only RUNNABLE processes are scheduled. SUSPENDED processes
+      // are skipped until kresume() (or kkill()) makes them RUNNABLE
+      // again; wakeup() never touches them.
       if (p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
@@ -747,37 +750,60 @@ ksuspend(int pid)
   return r;
 }
 
-// Resume the process with the given pid. If it is SUSPENDED it
-// becomes RUNNABLE; if its suspension was still pending, the
-// request is cancelled. Returns 0 on success, -1 otherwise.
+// Checks whether p may be resumed.
+// Allowed: SUSPENDED, or RUNNABLE/RUNNING/SLEEPING with a pending
+// suspension request (the request is cancelled).
+// p->lock must be held.
+static int
+can_resume(struct proc *p)
+{
+  if (p->killed)              // kkill() already took it out of SUSPENDED
+    return SUSP_EKILLED;
+
+  switch (p->state) {
+  case SUSPENDED:
+    return SUSP_OK;
+  case RUNNABLE:
+  case RUNNING:
+  case SLEEPING:
+    return p->suspend_req ? SUSP_OK : SUSP_ENOTSUSP;
+  default:                    // USED, ZOMBIE: not a live process
+    return SUSP_ESTATE;
+  }
+}
+
+// Internal resume operation: undo a suspension of p and hand it back
+// to the scheduler. If p is SUSPENDED it becomes RUNNABLE, so the
+// scheduler() loop picks it up again on its next pass; if the
+// suspension was only pending, the request is cancelled and p keeps
+// its current state.
+// p->lock must be held.
+static void
+resume_proc(struct proc *p)
+{
+  p->suspend_req = 0;
+  if (p->state == SUSPENDED) {
+    if (!suspend_transition_ok(p, RUNNABLE))
+      panic("resume_proc: bad transition");
+    p->state = RUNNABLE;
+  }
+}
+
+// Resume the process with the given pid.
+// Returns SUSP_OK on success or a negative SUSP_* error code.
 int
 kresume(int pid)
 {
   struct proc *p;
+  int r;
 
-  if (pid <= 0)
-    return -1;
+  if ((p = findproc(pid)) == 0)
+    return SUSP_ENOPROC;
 
-  for (p = proc; p < &proc[NPROC]; p++) {
-    acquire(&p->lock);
-    if (p->pid == pid && p->state != UNUSED) {
-      if (!p->suspend_req) {
-        // Neither suspended nor pending suspension.
-        release(&p->lock);
-        return -1;
-      }
-      p->suspend_req = 0;
-      if (p->state == SUSPENDED) {
-        if (!suspend_transition_ok(p, RUNNABLE))
-          panic("kresume: bad transition");
-        p->state = RUNNABLE;
-      }
-      release(&p->lock);
-      return 0;
-    }
-    release(&p->lock);
-  }
-  return -1;
+  if ((r = can_resume(p)) == SUSP_OK)
+    resume_proc(p);
+  release(&p->lock);
+  return r;
 }
 
 // Called by the current process at a safe point (just before
@@ -794,9 +820,14 @@ suspend_check(void)
     if (!suspend_transition_ok(p, SUSPENDED))
       panic("suspend_check: bad transition");
     p->state = SUSPENDED;
+    // p->lock stays held across sched() until the scheduler has
+    // switched away, so kresume() can never see SUSPENDED while
+    // this process is still running on a CPU.
     sched();
     // Resumed (or killed): p->state was set to RUNNABLE by
     // kresume()/kkill() and then RUNNING by the scheduler.
+    if (p->state != RUNNING)
+      panic("suspend_check: resumed but not running");
   }
   release(&p->lock);
 }

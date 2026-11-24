@@ -84,6 +84,7 @@ enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE, SUSPENDED };
 #define SUSP_EKILLED  -3
 #define SUSP_EALREADY -4
 #define SUSP_ESTATE   -5
+#define SUSP_ENOTSUSP -6   // resume: process is not suspended
 
 // Per-process state
 struct proc {
