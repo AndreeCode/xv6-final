@@ -537,6 +537,10 @@ forkret(void)
     }
   }
 
+  suspend_check();
+  if (killed(p))
+    kexit(-1);
+
   // return to user space, mimicing usertrap()'s return.
   prepare_return();
   uint64 satp = MAKE_SATP(p->pagetable);
@@ -688,46 +692,59 @@ suspend_transition_ok(struct proc *p, enum procstate to)
   }
 }
 
-// Returns 1 if a suspension may be requested for p, 0 otherwise.
 // p->lock must be held.
 static int
 can_request_suspend(struct proc *p)
 {
   if (p->pid == 1)            // never suspend init: it reaps orphans
-    return 0;
+    return SUSP_EINIT;
   if (p->killed)              // it is about to exit anyway
-    return 0;
+    return SUSP_EKILLED;
   if (p->suspend_req)         // already pending or suspended
-    return 0;
-  return p->state == RUNNABLE || p->state == RUNNING ||
-         p->state == SLEEPING;
+    return SUSP_EALREADY;
+
+  switch (p->state) {
+  case RUNNABLE:
+  case RUNNING:
+  case SLEEPING:
+    return SUSP_OK;
+  case SUSPENDED:
+    return SUSP_EALREADY;
+  default:
+    return SUSP_ESTATE;
+  }
 }
 
-// Request the suspension of the process with the given pid.
-// Returns 0 on success, -1 if the pid does not exist or the
-// process cannot be suspended in its current state.
-int
-ksuspend(int pid)
+static struct proc *
+findproc(int pid)
 {
   struct proc *p;
 
   if (pid <= 0)
-    return -1;
+    return 0;
 
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
-    if (p->pid == pid && p->state != UNUSED) {
-      if (!can_request_suspend(p)) {
-        release(&p->lock);
-        return -1;
-      }
-      p->suspend_req = 1;
-      release(&p->lock);
-      return 0;
-    }
+    if (p->pid == pid && p->state != UNUSED)
+      return p;
     release(&p->lock);
   }
-  return -1;
+  return 0;
+}
+
+int
+ksuspend(int pid)
+{
+  struct proc *p;
+  int r;
+
+  if ((p = findproc(pid)) == 0)
+    return SUSP_ENOPROC;
+
+  if ((r = can_request_suspend(p)) == SUSP_OK)
+    p->suspend_req = 1;
+  release(&p->lock);
+  return r;
 }
 
 // Resume the process with the given pid. If it is SUSPENDED it
