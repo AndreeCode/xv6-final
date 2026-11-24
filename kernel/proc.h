@@ -76,7 +76,7 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
-enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE, SUSPENDED };
 
 // Per-process state
 struct proc {
@@ -86,6 +86,7 @@ struct proc {
   enum procstate state; // Process state
   void *chan;           // If non-zero, sleeping on chan
   int killed;           // If non-zero, have been killed
+  int suspend_req;      // If non-zero, suspension requested (pending or active)
   int xstate;           // Exit status to be returned to parent's wait
   int pid;              // Process ID
 

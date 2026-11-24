@@ -85,6 +85,11 @@ usertrap(void)
   if (which_dev == 2)
     yield();
 
+  // enter SUSPENDED here if requested: no kernel locks are held.
+  suspend_check();
+  if (killed(p))
+    kexit(-1);
+
   prepare_return();
 
   // the user page table to switch to, for trampoline.S

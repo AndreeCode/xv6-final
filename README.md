@@ -1,2 +1,1 @@
-# xv6riscv-proceso-suspendido-
-# xv6-final
+# xv6riscv-process-suspend-resume

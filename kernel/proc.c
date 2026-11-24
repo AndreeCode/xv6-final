@@ -124,6 +124,7 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->suspend_req = 0;
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -166,6 +167,7 @@ freeproc(struct proc *p)
   p->name[0] = 0;
   p->chan = 0;
   p->killed = 0;
+  p->suspend_req = 0;
   p->xstate = 0;
   p->state = UNUSED;
 }
@@ -609,8 +611,14 @@ kkill(int pid)
     acquire(&p->lock);
     if (p->pid == pid) {
       p->killed = 1;
+      // A killed process must not stay suspended: cancel any
+      // pending or active suspension so it can reach kexit().
+      p->suspend_req = 0;
       if (p->state == SLEEPING) {
         // Wake process from sleep().
+        p->state = RUNNABLE;
+      } else if (p->state == SUSPENDED) {
+        // Wake process from suspension.
         p->state = RUNNABLE;
       }
       release(&p->lock);
@@ -638,6 +646,142 @@ killed(struct proc *p)
   k = p->killed;
   release(&p->lock);
   return k;
+}
+
+// ---------------------------------------------------------------
+// SUSPENDED state support.
+//
+// Allowed transitions involving SUSPENDED:
+//
+//   RUNNABLE / RUNNING / SLEEPING --ksuspend()--> (suspend_req = 1)
+//   RUNNING  --suspend_check()-->  SUSPENDED   (only at a safe point)
+//   SUSPENDED --kresume()-->       RUNNABLE
+//   SUSPENDED --kkill()-->         RUNNABLE    (so it can exit)
+//
+// Suspension is deferred: ksuspend() only marks the process, and the
+// process moves itself to SUSPENDED in suspend_check(), which runs
+// in usertrap() right before returning to user space. At that point
+// the process holds no kernel locks (spinlocks or sleeplocks), so
+// suspending it can never block other processes inside the kernel
+// (file system, pipes, disk...). A process that is SLEEPING keeps
+// sleeping normally and is suspended as soon as it wakes up and is
+// about to return to user mode.
+// ---------------------------------------------------------------
+
+// Returns 1 if moving p from its current state to `to` is a valid
+// transition for the suspend/resume machinery, 0 otherwise.
+// p->lock must be held.
+static int
+suspend_transition_ok(struct proc *p, enum procstate to)
+{
+  enum procstate from = p->state;
+
+  switch (to) {
+  case SUSPENDED:
+    // Only the process itself, while running, enters SUSPENDED.
+    return from == RUNNING && p == myproc();
+  case RUNNABLE:
+    // Leaving SUSPENDED always goes back to RUNNABLE.
+    return from == SUSPENDED;
+  default:
+    return 0;
+  }
+}
+
+// Returns 1 if a suspension may be requested for p, 0 otherwise.
+// p->lock must be held.
+static int
+can_request_suspend(struct proc *p)
+{
+  if (p->pid == 1)            // never suspend init: it reaps orphans
+    return 0;
+  if (p->killed)              // it is about to exit anyway
+    return 0;
+  if (p->suspend_req)         // already pending or suspended
+    return 0;
+  return p->state == RUNNABLE || p->state == RUNNING ||
+         p->state == SLEEPING;
+}
+
+// Request the suspension of the process with the given pid.
+// Returns 0 on success, -1 if the pid does not exist or the
+// process cannot be suspended in its current state.
+int
+ksuspend(int pid)
+{
+  struct proc *p;
+
+  if (pid <= 0)
+    return -1;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->pid == pid && p->state != UNUSED) {
+      if (!can_request_suspend(p)) {
+        release(&p->lock);
+        return -1;
+      }
+      p->suspend_req = 1;
+      release(&p->lock);
+      return 0;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+// Resume the process with the given pid. If it is SUSPENDED it
+// becomes RUNNABLE; if its suspension was still pending, the
+// request is cancelled. Returns 0 on success, -1 otherwise.
+int
+kresume(int pid)
+{
+  struct proc *p;
+
+  if (pid <= 0)
+    return -1;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->pid == pid && p->state != UNUSED) {
+      if (!p->suspend_req) {
+        // Neither suspended nor pending suspension.
+        release(&p->lock);
+        return -1;
+      }
+      p->suspend_req = 0;
+      if (p->state == SUSPENDED) {
+        if (!suspend_transition_ok(p, RUNNABLE))
+          panic("kresume: bad transition");
+        p->state = RUNNABLE;
+      }
+      release(&p->lock);
+      return 0;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+// Called by the current process at a safe point (just before
+// returning to user space). If a suspension was requested, the
+// process enters SUSPENDED and gives up the CPU until kresume()
+// or kkill() makes it RUNNABLE again.
+void
+suspend_check(void)
+{
+  struct proc *p = myproc();
+
+  acquire(&p->lock);
+  if (p->suspend_req && !p->killed) {
+    if (!suspend_transition_ok(p, SUSPENDED))
+      panic("suspend_check: bad transition");
+    p->state = SUSPENDED;
+    sched();
+    // Resumed (or killed): p->state was set to RUNNABLE by
+    // kresume()/kkill() and then RUNNING by the scheduler.
+  }
+  release(&p->lock);
 }
 
 // Copy to either a user address, or kernel address,
@@ -683,7 +827,8 @@ procdump(void)
     [SLEEPING]  = "sleep ",
     [RUNNABLE]  = "runble",
     [RUNNING]   = "run   ",
-    [ZOMBIE]    = "zombie"
+    [ZOMBIE]    = "zombie",
+    [SUSPENDED] = "susp  "
     // clang-format on
   };
   struct proc *p;
@@ -698,6 +843,8 @@ procdump(void)
     else
       state = "???";
     printk("%d %s %s", p->pid, state, p->name);
+    if (p->suspend_req && p->state != SUSPENDED)
+      printk(" (suspend pending)");
     printk("\n");
   }
 }
