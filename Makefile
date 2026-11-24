@@ -155,6 +155,7 @@ UPROGS=\
 	$U/_resume\
 	$U/_pstate\
 	$U/_suspendtest\
+	$U/_spin\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
