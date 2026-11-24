@@ -21,6 +21,37 @@ $ suspendtest
 
 Retornan `0` si la operación es correcta, o un código negativo `SUSP_*` (ver `kernel/proc.h`).
 
+## Parte 4: consulta y pruebas
+
+**Makefile**: se agregan `$U/_pstate` y `$U/_suspendtest` a `UPROGS` para que se compilen y se copien a `fs.img`; sin esto no existen como comandos en el shell.
+
+**Instrucciones**:
+
+```
+make clean && make qemu
+$ pstate 1 2
+$ suspendtest
+```
+
+**Salida esperada**:
+
+```
+PID     ESTADO
+1       sleeping
+2       sleeping
+
+OK  : 1. suspender proceso en ejecucion
+OK  : 2. reanudar proceso suspendido
+OK  : 3. suspender dos veces da error
+OK  : 4. no se puede suspender init
+OK  : 5. pid inexistente da error
+OK  : 6. reanudar proceso no suspendido da error
+OK  : 7. matar proceso suspendido
+OK  : 8. suspension pendiente de proceso dormido
+
+8 OK, 0 FAIL
+```
+
 ## Relación con Linux
 
 Equivale a `kill -STOP <pid>` / `kill -CONT <pid>` (señales `SIGSTOP` y `SIGCONT`). En Linux el proceso detenido aparece con estado `T` en `ps`, como aquí aparece `suspended` en `pstate`.
