@@ -78,14 +78,23 @@ main(void)
 
   // 8. A sleeping process stays SLEEPING (suspension is pending)
   //    and the request can be cancelled with resume.
+  //    The child blocks on an empty pipe instead of pause(): pause()
+  //    wakes up on every clock tick, so the child would sometimes be
+  //    RUNNABLE instead of SLEEPING when pstate() is called.
+  int fds[2];
+  char c;
+  pipe(fds);
   pid = fork();
   if (pid == 0) {
-    pause(1000);
+    close(fds[1]);
+    read(fds[0], &c, 1);          // blocks: nobody writes to the pipe
     exit(0);
   }
+  close(fds[0]);
   pause(2);
   check(suspend(pid) == 0 && pstate(pid) == SLEEPING && resume(pid) == 0,
         "8. suspension pendiente de proceso dormido");
+  close(fds[1]);
   reap(pid);
 
   printf("\n%d OK, %d FAIL\n", ok, fail);
